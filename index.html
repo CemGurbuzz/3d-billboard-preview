@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>3D Billboard Önizleme</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: rgba(22, 27, 34, 0.92);
+    --panel-border: rgba(240, 246, 252, 0.12);
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #2f81f7;
+    --accent-hover: #4593f8;
+    --ok: #3fb950;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    -webkit-user-select: none; user-select: none;
+  }
+  canvas { display: block; touch-action: none; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    backdrop-filter: blur(8px);
+  }
+  button {
+    font: inherit;
+    color: var(--text);
+    background: rgba(240, 246, 252, 0.08);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    min-height: 44px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: rgba(240, 246, 252, 0.15); }
+  button.primary { background: var(--accent); border-color: transparent; }
+  button.primary:hover { background: var(--accent-hover); }
+  button.active { background: var(--accent); border-color: transparent; }
+  .hidden { display: none !important; }
+
+  input[type="text"], input[type="number"] {
+    font: inherit; font-size: 13px;
+    color: var(--text);
+    background: rgba(240, 246, 252, 0.06);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    width: 100%;
+  }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+  label { font-size: 13px; color: var(--text-dim); }
+
+  /* ---- Açılış / dosya yükleme overlay ---- */
+  #dropOverlay {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(13,17,23,0.7), rgba(13,17,23,0.95));
+    padding: 16px;
+  }
+  #dropCard {
+    max-width: 420px; width: 100%;
+    padding: 32px 28px;
+    text-align: center;
+    border: 2px dashed rgba(240, 246, 252, 0.25);
+  }
+  #dropCard h1 { font-size: 20px; margin-bottom: 8px; }
+  #dropCard p { color: var(--text-dim); font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
+  #dropCard .buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 18px; }
+  .fileStatus {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-dim);
+    padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    margin: 0 4px;
+  }
+  .fileStatus.loaded { color: var(--ok); border-color: rgba(63, 185, 80, 0.4); }
+
+  body.dragging #dropCard { border-color: var(--accent); }
+  #dragHint {
+    position: fixed; inset: 12px; z-index: 30;
+    border: 3px dashed var(--accent); border-radius: 16px;
+    background: rgba(47, 129, 247, 0.08);
+    pointer-events: none;
+    display: none;
+  }
+  body.dragging #dragHint { display: block; }
+
+  /* ---- Sahne yüklendikten sonraki HUD ---- */
+  #miniPanel {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    max-width: min(480px, calc(100vw - 140px));
+    padding: 8px 10px;
+  }
+  #miniPanel button { min-height: 36px; padding: 6px 10px; font-size: 13px; }
+
+  #angleIndicator {
+    position: fixed; top: 12px; right: 12px; z-index: 10;
+    padding: 10px 16px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  #angleIndicator .value { font-size: 18px; font-weight: 600; }
+  #angleIndicator .label { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+  #controls {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 10;
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100vw - 32px);
+    padding: 10px;
+  }
+  #vpButtons { display: flex; gap: 6px; }
+  #vpButtons button { min-height: 40px; padding: 6px 12px; font-size: 13px; }
+
+  #toast {
+    position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
+    z-index: 40; max-width: min(480px, calc(100vw - 32px));
+    padding: 12px 18px; font-size: 14px;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.25s;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ---- Editör paneli ---- */
+  #editorPanel {
+    position: fixed; top: 70px; left: 12px; z-index: 15;
+    width: min(320px, calc(100vw - 24px));
+    max-height: calc(100vh - 160px); overflow-y: auto;
+    padding: 16px;
+    font-size: 13px;
+  }
+  #editorPanel h2 { font-size: 15px; margin-bottom: 4px; }
+  #editorPanel h3 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--accent); margin: 16px 0 8px;
+    border-top: 1px solid var(--panel-border); padding-top: 12px;
+  }
+  #editorPanel h3:first-of-type { border-top: none; padding-top: 4px; }
+  .edRow { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  .edRow label { flex: 1; }
+  .edRow .val { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+  .edRow input[type="number"] { width: 64px; }
+  #editorPanel .urlRow { margin: 6px 0; }
+  #editorPanel .urlRow label { display: block; margin-bottom: 3px; font-size: 12px; }
+  #editorPanel .note { font-size: 11px; color: var(--text-dim); margin-top: 6px; line-height: 1.4; }
+  #copyLinkBtn { width: 100%; margin-top: 10px; }
+
+  /* ---- Yardım paneli ---- */
+  #helpBtn {
+    position: fixed; bottom: 16px; right: 16px; z-index: 10;
+    width: 44px; min-height: 44px; padding: 0; border-radius: 50%;
+    font-size: 18px; font-weight: 600;
+  }
+  #helpPanel {
+    position: fixed; bottom: 70px; right: 16px; z-index: 15;
+    width: min(400px, calc(100vw - 32px));
+    max-height: calc(100vh - 100px); overflow-y: auto;
+    padding: 20px;
+    font-size: 13px; line-height: 1.55;
+  }
+  #helpPanel h2 { font-size: 15px; margin-bottom: 8px; }
+  #helpPanel h3 { font-size: 13px; margin: 14px 0 4px; color: var(--accent); }
+  #helpPanel code {
+    background: rgba(240, 246, 252, 0.1);
+    padding: 1px 5px; border-radius: 4px;
+    font-size: 12px;
+  }
+  #helpPanel ul { padding-left: 18px; color: var(--text-dim); }
+  #helpPanel li { margin: 3px 0; }
+
+  /* ---- Preview modu: editör ve dosya UI'ları gizli ---- */
+  body.preview #miniPanel,
+  body.preview #editorPanel,
+  body.preview #dropOverlay { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="dragHint"></div>
+
+<div id="dropOverlay">
+  <div id="dropCard" class="panel">
+    <h1>3D Billboard Önizleme</h1>
+    <p>Blender'dan export edilen <b>.glb</b> sahnesini ve ekranlarda oynayacak <b>.mp4</b> videoları bu pencereye sürükleyin veya seçin.</p>
+    <div class="buttons">
+      <button class="primary" id="pickGlbBtn">📦 3D Model (.glb)</button>
+      <button class="primary" id="pickVideoBtn">🎬 Video (.mp4)</button>
+    </div>
+    <span class="fileStatus" id="glbStatus">○ Model bekleniyor</span>
+    <span class="fileStatus" id="videoStatus">○ Video bekleniyor</span>
+  </div>
+</div>
+
+<div id="miniPanel" class="panel hidden">
+  <button id="editorBtn" title="Editör panelini aç/kapat">⚙ Editör</button>
+  <button id="miniGlbBtn" title="Modeli değiştir">📦 .glb</button>
+  <span id="screenButtons" style="display:flex;gap:6px;flex-wrap:wrap;"></span>
+</div>
+
+<div id="editorPanel" class="panel hidden">
+  <h2>Editör</h2>
+
+  <h3>Açı Limitleri — <span id="edVpName">Viewpoint 1</span></h3>
+  <div class="edRow">
+    <label for="edAz">Yatay ±</label>
+    <input type="range" id="edAz" min="1" max="90" step="1" value="20" style="flex:3">
+    <span class="val" id="edAzVal">20°</span>
+  </div>
+  <div class="edRow">
+    <label for="edPol">Dikey ±</label>
+    <input type="range" id="edPol" min="1" max="45" step="1" value="5" style="flex:3">
+    <span class="val" id="edPolVal">5°</span>
+  </div>
+
+  <h3>Zoom (tekerlek / pinch)</h3>
+  <div class="edRow">
+    <label for="edZoomOn">Etkin</label>
+    <input type="checkbox" id="edZoomOn" checked>
+  </div>
+  <div class="edRow">
+    <label>Aralık (× mesafe)</label>
+    <input type="number" id="edZoomMin" min="0.2" max="1" step="0.05" value="0.5">
+    <input type="number" id="edZoomMax" min="1" max="3" step="0.05" value="1.6">
+  </div>
+
+  <h3>Otomatik Tur</h3>
+  <div class="edRow">
+    <label for="edTourOn">Etkin</label>
+    <input type="checkbox" id="edTourOn" checked>
+  </div>
+  <div class="edRow">
+    <label for="edTourSpeed">Hız</label>
+    <input type="range" id="edTourSpeed" min="0.1" max="1.5" step="0.05" value="0.4" style="flex:2">
+    <span class="val" id="edTourSpeedVal">0.40</span>
+  </div>
+
+  <h3>Müşteri Linki</h3>
+  <div class="urlRow">
+    <label for="edGlbUrl">.glb URL</label>
+    <input type="text" id="edGlbUrl" placeholder="https://…/sahne.glb">
+  </div>
+  <div id="edVideoUrls"></div>
+  <button class="primary" id="copyLinkBtn">🔗 Preview linkini kopyala</button>
+  <p class="note">Dosyaların müşterinin erişebileceği bir adreste (sunucu, GitHub Pages vb.) host edilmesi gerekir; sürükle-bırak ile yüklenen yerel dosyalar linkle taşınamaz. Link, tüm açı/zoom/tur ayarlarını içerir ve salt-önizleme modunda açılır.</p>
+</div>
+
+<div id="angleIndicator" class="panel hidden">
+  <div class="value" id="angleValue">0° / 0°</div>
+  <div class="label">yatay / dikey</div>
+</div>
+
+<div id="controls" class="panel hidden">
+  <span id="vpButtons" class="hidden"></span>
+  <button class="primary" id="idealBtn">⌖ İdeal Viewpoint</button>
+  <button id="muteBtn" class="hidden">🔇 Sesi Aç</button>
+</div>
+
+<div id="toast" class="panel"></div>
+
+<button id="helpBtn" class="panel" title="Blender export rehberi">?</button>
+<div id="helpPanel" class="panel hidden">
+  <h2>Blender Export Rehberi</h2>
+  <h3>İsimlendirme</h3>
+  <ul>
+    <li>Ekran materyalleri: <code>ScreenMaterial</code>, birden fazla ekran için <code>ScreenMaterial.1</code>, <code>ScreenMaterial.2</code>… (Blender'ın <code>.001</code> soneki de kabul edilir)</li>
+    <li>Yedek seçici — ekran objeleri: <code>BillboardScreen</code>, <code>BillboardScreen.1</code>…</li>
+    <li>Viewpoint kameraları: <code>ViewpointCamera</code>, <code>ViewpointCamera.1</code>… — sahnedeki tüm kameralar viewpoint olur, kameranın baktığı yön orbit merkezini belirler</li>
+    <li>Her ekranın UV'si 0–1 alanını doldurmalı; video doğrudan bu UV'ye kaplanır</li>
+    <li>ASCII karakter kullanın (boşluk ve Türkçe karakter yok)</li>
+  </ul>
+  <h3>Export ayarları (glTF 2.0)</h3>
+  <ul>
+    <li>Format: <b>glTF Binary (.glb)</b></li>
+    <li>Include → <b>Cameras: açık</b> (kritik!)</li>
+    <li>Include → Punctual Lights: sahnede ışık varsa açık</li>
+    <li>Transform → +Y Up: açık (varsayılan)</li>
+    <li>Data → Mesh → Apply Modifiers, UVs, Normals: açık</li>
+    <li>Material → Materials: Export</li>
+    <li><b>Compression (Draco): kapalı</b></li>
+  </ul>
+  <h3>Kullanım</h3>
+  <ul>
+    <li>Sürükleyerek gezinin (limitler viewpoint başına ayarlanabilir)</li>
+    <li>Tekerlek / iki parmak: ileri-geri zoom</li>
+    <li>Alt kısımdan viewpoint değiştirin; ⚙ Editör'den ayarları yapıp müşteri linki üretin</li>
+    <li>URL ile otomatik yükleme: <code>?glb=URL&video=URL</code> veya <code>#cfg=…</code> (editörün ürettiği link)</li>
+  </ul>
+</div>
+
+<input type="file" id="glbInput" accept=".glb,.gltf,model/gltf-binary" class="hidden">
+<input type="file" id="videoInput" accept="video/mp4,video/webm,video/*" class="hidden">
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const DEG = Math.PI / 180;
+const DAMPING = 0.12;
+const SNAP_DURATION = 800;     // ms — açı sıfırlama tween'i
+const VP_TWEEN_DURATION = 900; // ms — viewpoint geçiş uçuşu
+const DEFAULT_LIMITS = () => ({ azDeg: 20, polDeg: 5 });
+
+const SCREEN_MAT_RE = /^ScreenMaterial(\.\d+)?$/;
+const SCREEN_OBJ_RE = /^BillboardScreen(\.\d+)?$/;
+// Sondaki numara: "ScreenMaterial.2" → 2; GLTFLoader düğüm adlarındaki noktaları
+// temizlediği için ("ViewpointCamera.1" → "ViewpointCamera1") noktasız hali de kabul et
+const sufNum = (n) => { const m = /\.?(\d+)$/.exec(n); return m ? parseInt(m[1], 10) : 0; };
+
+const state = {
+  hasModel: false,
+  modelRoot: null,
+  screens: [],        // { id, label, targets:[{mesh,slot}], video, texture, material }
+  videoURLs: [],      // ekran index'i → atanmış video URL'i (model yeniden yüklense de korunur)
+  viewpoints: [],     // { name, position, fov, pivot, radius, baseTheta, basePhi, limits:{azDeg,polDeg} }
+  activeVp: 0,
+  az: 0, pol: 0,
+  azTarget: 0, polTarget: 0,
+  zoom: 1, zoomTarget: 1,
+  mode: 'tour',       // 'tour' | 'interactive'
+  tourStartTime: 0,
+  snap: null,         // { t0, fromAz, fromPol }
+  vpTween: null,      // { t0, fromPos, fromPivot, fromFov }
+  muted: true,
+  pickScreenIndex: null,   // video file picker hangi ekran için açıldı
+  cfg: {
+    preview: false,
+    zoom: { min: 0.5, max: 1.6, on: true },
+    tour: { on: true, speed: 0.4 },
+    cfgVideos: null,       // #cfg'den gelen { screenId: url } eşlemesi
+    pendingVpLimits: null, // #cfg'den gelen [{az,pol}] — model yüklenince uygulanır
+    initialVp: 0,
+  },
+};
+
+// ---------- Renderer & sahne ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1117);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 1, 5);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------- UI referansları ----------
+const el = (id) => document.getElementById(id);
+const dropOverlay = el('dropOverlay');
+const angleValue = el('angleValue');
+const toast = el('toast');
+
+let toastTimer = null;
+function showToast(msg, ms = 4500) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), ms);
+}
+
+function updateLoadUI() {
+  const anyVideo = state.screens.some(s => s.video) || state.videoURLs.some(Boolean);
+  el('glbStatus').textContent = state.hasModel ? '✓ Model yüklendi' : '○ Model bekleniyor';
+  el('glbStatus').classList.toggle('loaded', state.hasModel);
+  el('videoStatus').textContent = anyVideo ? '✓ Video yüklendi' : '○ Video bekleniyor';
+  el('videoStatus').classList.toggle('loaded', anyVideo);
+  if (state.hasModel) {
+    dropOverlay.classList.add('hidden');
+    el('miniPanel').classList.remove('hidden');
+    el('angleIndicator').classList.remove('hidden');
+    el('controls').classList.remove('hidden');
+  }
+}
+
+function updateScreensUI() {
+  // Mini paneldeki ekran başına video butonları
+  const wrap = el('screenButtons');
+  wrap.innerHTML = '';
+  state.screens.forEach((s, i) => {
+    const b = document.createElement('button');
+    const mark = s.video ? '✓' : '○';
+    b.textContent = state.screens.length === 1 ? `🎬 .mp4 ${mark}` : `🎬 ${s.label} ${mark}`;
+    b.title = `${s.id} için video seç`;
+    b.addEventListener('click', () => { state.pickScreenIndex = i; el('videoInput').click(); });
+    wrap.appendChild(b);
+  });
+  // Editördeki ekran başına video URL alanları
+  const urls = el('edVideoUrls');
+  urls.innerHTML = '';
+  state.screens.forEach((s) => {
+    const row = document.createElement('div');
+    row.className = 'urlRow';
+    const lab = document.createElement('label');
+    lab.textContent = `${s.label} video URL (${s.id})`;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.placeholder = 'https://…/video.mp4';
+    inp.dataset.screenId = s.id;
+    row.append(lab, inp);
+    urls.appendChild(row);
+  });
+}
+
+function updateVpUI() {
+  const wrap = el('vpButtons');
+  wrap.innerHTML = '';
+  wrap.classList.toggle('hidden', state.viewpoints.length < 2);
+  state.viewpoints.forEach((vp, i) => {
+    const b = document.createElement('button');
+    b.textContent = `VP ${i + 1}`;
+    b.title = vp.name;
+    b.classList.toggle('active', i === state.activeVp);
+    b.addEventListener('click', () => switchViewpoint(i));
+    wrap.appendChild(b);
+  });
+  const vp = state.viewpoints[state.activeVp];
+  if (vp) {
+    el('edVpName').textContent = state.viewpoints.length > 1 ? `Viewpoint ${state.activeVp + 1}` : 'Viewpoint 1';
+    el('edAz').value = vp.limits.azDeg;
+    el('edAzVal').textContent = `${vp.limits.azDeg}°`;
+    el('edPol').value = vp.limits.polDeg;
+    el('edPolVal').textContent = `${vp.limits.polDeg}°`;
+  }
+}
+
+// ---------- Video pipeline (ekran başına) ----------
+function attachVideoToScreen(screen, url) {
+  if (!screen.video) {
+    screen.video = document.createElement('video');
+    screen.video.loop = true;
+    screen.video.playsInline = true;
+    screen.video.crossOrigin = 'anonymous';
+    screen.video.preload = 'auto';
+  }
+  screen.video.muted = state.muted;
+  screen.video.src = url;
+  screen.video.play().catch(() => { /* kullanıcı etkileşimiyle tekrar denenir */ });
+
+  if (screen.texture) screen.texture.dispose();
+  const tex = new THREE.VideoTexture(screen.video);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.flipY = false;               // glTF UV konvansiyonu
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  screen.texture = tex;
+
+  if (!screen.material) {
+    // LED ekran: ışıktan etkilenmeyen, tone map'lenmeyen düz video yüzeyi
+    screen.material = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide });
+  } else {
+    screen.material.map = tex;
+    screen.material.needsUpdate = true;
+  }
+  for (const { mesh, slot } of screen.targets) {
+    if (slot === -1) mesh.material = screen.material;
+    else mesh.material[slot] = screen.material;
+  }
+  el('muteBtn').classList.remove('hidden');
+}
+
+function loadVideoURL(url, screenIndex = null) {
+  if (state.hasModel && state.screens.length > 0) {
+    let i = screenIndex;
+    if (i == null) {
+      i = state.screens.findIndex(s => !s.video);   // videosu olmayan ilk ekran
+      if (i === -1) i = 0;
+    }
+    i = Math.min(i, state.screens.length - 1);
+    state.videoURLs[i] = url;
+    attachVideoToScreen(state.screens[i], url);
+    updateScreensUI();
+  } else {
+    // Model henüz yok: sıraya al, model gelince uygulanır
+    const i = screenIndex ?? state.videoURLs.length;
+    state.videoURLs[i] = url;
+  }
+  updateLoadUI();
+}
+
+function setMutedAll(muted) {
+  state.muted = muted;
+  for (const s of state.screens) {
+    if (s.video) {
+      s.video.muted = muted;
+      if (!muted) s.video.play().catch(() => {});
+    }
+  }
+  el('muteBtn').textContent = muted ? '🔇 Sesi Aç' : '🔊 Sesi Kapat';
+}
+
+// ---------- .glb yükleme ----------
+const gltfLoader = new GLTFLoader();
+
+function disposeModel() {
+  if (!state.modelRoot) return;
+  const screenMats = new Set(state.screens.map(s => s.material));
+  scene.remove(state.modelRoot);
+  state.modelRoot.traverse((o) => {
+    if (o.isMesh) {
+      o.geometry?.dispose();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m || screenMats.has(m)) continue;
+        for (const key of Object.keys(m)) {
+          if (m[key] && m[key].isTexture) m[key].dispose();
+        }
+        m.dispose();
+      }
+    }
+  });
+  for (const s of state.screens) {
+    if (s.video) { s.video.pause(); s.video.removeAttribute('src'); }
+    s.texture?.dispose();
+    s.material?.dispose();
+  }
+  state.modelRoot = null;
+  state.screens = [];
+  state.viewpoints = [];
+}
+
+function findScreens(root) {
+  const byId = new Map();
+  const materialNames = new Set();
+
+  // 1) Birincil: ScreenMaterial(.N) adlı materyal slotları
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    mats.forEach((m, i) => {
+      if (!m) return;
+      materialNames.add(m.name || '(adsız)');
+      if (SCREEN_MAT_RE.test(m.name)) {
+        if (!byId.has(m.name)) byId.set(m.name, []);
+        byId.get(m.name).push({ mesh: o, slot: Array.isArray(o.material) ? i : -1 });
+      }
+    });
+  });
+
+  // 2) Yedek: BillboardScreen(.N) adlı objeler
+  if (byId.size === 0) {
+    const nodes = [];
+    root.traverse((o) => { if (SCREEN_OBJ_RE.test(o.name)) nodes.push(o); });
+    for (const n of nodes) {
+      const targets = [];
+      n.traverse((o) => { if (o.isMesh) targets.push({ mesh: o, slot: -1 }); });
+      if (targets.length) byId.set(n.name, targets);
+    }
+  }
+
+  const ids = [...byId.keys()].sort((a, b) => sufNum(a) - sufNum(b) || a.localeCompare(b));
+  const screens = ids.map((id, i) => ({
+    id, label: `Ekran ${i + 1}`, targets: byId.get(id),
+    video: null, texture: null, material: null,
+  }));
+  return { screens, materialNames };
+}
+
+function screensBBoxCenter() {
+  const box = new THREE.Box3();
+  let any = false;
+  for (const s of state.screens) for (const { mesh } of s.targets) { box.expandByObject(mesh); any = true; }
+  if (!any && state.modelRoot) box.setFromObject(state.modelRoot);
+  return box.getCenter(new THREE.Vector3());
+}
+
+function computePivot(camObj) {
+  // Kameranın baktığı yönde raycast: önce ekranlara, sonra tüm sahneye
+  const origin = camObj.getWorldPosition(new THREE.Vector3());
+  const dir = camObj.getWorldDirection(new THREE.Vector3());
+  const ray = new THREE.Raycaster(origin, dir);
+  const screenMeshes = state.screens.flatMap(s => s.targets.map(t => t.mesh));
+  let hits = screenMeshes.length ? ray.intersectObjects(screenMeshes, false) : [];
+  if (!hits.length && state.modelRoot) hits = ray.intersectObject(state.modelRoot, true);
+  if (hits.length) return hits[0].point.clone();
+  return screensBBoxCenter();
+}
+
+function setupViewpoints(gltf) {
+  state.viewpoints = [];
+  const cams = (gltf.cameras || []).slice()
+    .sort((a, b) => sufNum(a.name || '') - sufNum(b.name || '') || (a.name || '').localeCompare(b.name || ''));
+
+  for (const cam of cams) {
+    const position = cam.getWorldPosition(new THREE.Vector3());
+    const pivot = computePivot(cam);
+    const sph = new THREE.Spherical().setFromVector3(position.clone().sub(pivot));
+    state.viewpoints.push({
+      name: cam.name || `Camera${state.viewpoints.length}`,
+      position, pivot,
+      fov: cam.isPerspectiveCamera ? cam.fov : 50,
+      radius: sph.radius, baseTheta: sph.theta, basePhi: sph.phi,
+      limits: DEFAULT_LIMITS(),
+    });
+  }
+
+  if (state.viewpoints.length === 0) {
+    // Fallback: ekran bbox'ından otomatik kadraj
+    const pivot = screensBBoxCenter();
+    const box = new THREE.Box3().setFromObject(state.modelRoot);
+    const size = box.getSize(new THREE.Vector3());
+    const d = Math.max(size.x, size.y, size.z, 0.5) * 2.2;
+    const position = pivot.clone().add(new THREE.Vector3(0, size.y * 0.2, d));
+    const sph = new THREE.Spherical().setFromVector3(position.clone().sub(pivot));
+    state.viewpoints.push({
+      name: '(otomatik)', position, pivot, fov: 50,
+      radius: sph.radius, baseTheta: sph.theta, basePhi: sph.phi,
+      limits: DEFAULT_LIMITS(),
+    });
+    showToast('⚠ .glb içinde kamera bulunamadı — otomatik viewpoint kullanılıyor. Blender export\'ta "Include → Cameras" seçeneğini açın.');
+  }
+
+  // #cfg'den gelen limitler
+  if (state.cfg.pendingVpLimits) {
+    state.cfg.pendingVpLimits.forEach((l, i) => {
+      if (state.viewpoints[i] && l) state.viewpoints[i].limits = { azDeg: l.az, polDeg: l.pol };
+    });
+    state.cfg.pendingVpLimits = null;
+  }
+}
+
+function applyViewpoint(i) {
+  const vp = state.viewpoints[i];
+  camera.fov = vp.fov;
+  camera.near = Math.max(vp.radius / 100, 0.01);
+  camera.far = vp.radius * 200;
+  camera.updateProjectionMatrix();
+}
+
+function loadModelURL(url) {
+  showToast('Sahne yükleniyor…', 60000);
+  gltfLoader.load(url, (gltf) => {
+    toast.classList.remove('show');
+    disposeModel();
+    state.modelRoot = gltf.scene;
+    scene.add(gltf.scene);
+    scene.updateMatrixWorld(true);
+
+    const { screens, materialNames } = findScreens(gltf.scene);
+    state.screens = screens;
+    if (screens.length === 0) {
+      showToast(`⚠ "ScreenMaterial" materyali veya "BillboardScreen" objesi bulunamadı. Sahnedeki materyaller: ${[...materialNames].join(', ') || '(yok)'}`, 8000);
+    }
+
+    setupViewpoints(gltf);
+
+    // Bekleyen videolar: index bazlı + #cfg'den id bazlı
+    if (state.cfg.cfgVideos) {
+      state.screens.forEach((s, i) => {
+        if (state.cfg.cfgVideos[s.id]) state.videoURLs[i] = state.cfg.cfgVideos[s.id];
+      });
+      state.cfg.cfgVideos = null;
+    }
+    state.videoURLs.forEach((u, i) => {
+      if (u && state.screens[i]) attachVideoToScreen(state.screens[i], u);
+    });
+
+    state.hasModel = true;
+    state.activeVp = Math.min(state.cfg.initialVp, state.viewpoints.length - 1);
+    state.az = state.pol = state.azTarget = state.polTarget = 0;
+    state.zoom = state.zoomTarget = 1;
+    state.snap = null;
+    state.vpTween = null;
+    applyViewpoint(state.activeVp);
+    state.mode = state.cfg.tour.on ? 'tour' : 'interactive';
+    state.tourStartTime = performance.now() / 1000;
+    updateLoadUI();
+    updateScreensUI();
+    updateVpUI();
+  }, undefined, (err) => {
+    console.error(err);
+    showToast('⚠ .glb dosyası yüklenemedi. Draco compression kapalı, standart bir glTF Binary export olduğundan emin olun.', 7000);
+  });
+}
+
+// ---------- Viewpoint geçişi ----------
+function switchViewpoint(i, animate = true) {
+  if (!state.viewpoints[i] || i === state.activeVp) return;
+  const oldVp = state.viewpoints[state.activeVp];
+  const fromPos = camera.position.clone();
+  const fromPivot = oldVp.pivot.clone();
+  const fromFov = camera.fov;
+  state.activeVp = i;
+  state.az = state.pol = state.azTarget = state.polTarget = 0;
+  state.zoom = state.zoomTarget = 1;
+  state.snap = null;
+  applyViewpoint(i);
+  if (animate) {
+    camera.fov = fromFov;   // tween fov'u kademeli uygular
+    camera.updateProjectionMatrix();
+    state.vpTween = { t0: performance.now(), fromPos, fromPivot, fromFov };
+  }
+  updateVpUI();
+}
+
+// ---------- Dosya girişleri (picker + drag & drop) ----------
+function handleFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.glb') || name.endsWith('.gltf')) {
+    loadModelURL(URL.createObjectURL(file));
+  } else if (file.type.startsWith('video/') || name.endsWith('.mp4') || name.endsWith('.webm')) {
+    loadVideoURL(URL.createObjectURL(file), state.pickScreenIndex);
+    state.pickScreenIndex = null;
+  } else {
+    showToast(`"${file.name}" desteklenmiyor — .glb veya .mp4 bekleniyor.`);
+  }
+}
+
+el('glbInput').addEventListener('change', (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; });
+el('videoInput').addEventListener('change', (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; });
+for (const id of ['pickGlbBtn', 'miniGlbBtn']) el(id).addEventListener('click', () => el('glbInput').click());
+el('pickVideoBtn').addEventListener('click', () => { state.pickScreenIndex = null; el('videoInput').click(); });
+
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('dragging');
+  state.pickScreenIndex = null;
+  for (const file of e.dataTransfer.files) handleFile(file);
+});
+
+// ---------- Kamera kontrolü: kısıtlı orbit + zoom ----------
+const canvas = renderer.domElement;
+const pointers = new Map();   // pointerId → {x, y}
+let pinchDist = 0;
+
+function stopTour() {
+  if (state.mode === 'tour') state.mode = 'interactive';
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!state.hasModel) return;
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  stopTour();
+  state.snap = null;
+  canvas.setPointerCapture(e.pointerId);
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+  }
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!pointers.has(e.pointerId)) return;
+  const p = pointers.get(e.pointerId);
+  const dx = e.clientX - p.x;
+  const dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+
+  if (pointers.size === 2) {
+    // Pinch zoom
+    if (!state.cfg.zoom.on) return;
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchDist > 0 && d > 0) {
+      state.zoomTarget = THREE.MathUtils.clamp(state.zoomTarget * (pinchDist / d), state.cfg.zoom.min, state.cfg.zoom.max);
+    }
+    pinchDist = d;
+    return;
+  }
+
+  const vp = state.viewpoints[state.activeVp];
+  if (!vp) return;
+  const h = canvas.clientHeight;
+  state.azTarget  = THREE.MathUtils.clamp(state.azTarget - dx * (60 * DEG) / h, -vp.limits.azDeg * DEG, vp.limits.azDeg * DEG);
+  state.polTarget = THREE.MathUtils.clamp(state.polTarget + dy * (20 * DEG) / h, -vp.limits.polDeg * DEG, vp.limits.polDeg * DEG);
+});
+const endPointer = (e) => {
+  pointers.delete(e.pointerId);
+  pinchDist = 0;
+};
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+
+canvas.addEventListener('wheel', (e) => {
+  if (!state.hasModel || !state.cfg.zoom.on) return;
+  e.preventDefault();
+  stopTour();
+  state.zoomTarget = THREE.MathUtils.clamp(
+    state.zoomTarget * Math.exp(e.deltaY * 0.001),
+    state.cfg.zoom.min, state.cfg.zoom.max
+  );
+}, { passive: false });
+
+el('idealBtn').addEventListener('click', () => {
+  stopTour();
+  state.zoomTarget = 1;
+  state.snap = { t0: performance.now(), fromAz: state.az, fromPol: state.pol };
+});
+
+el('muteBtn').addEventListener('click', () => setMutedAll(!state.muted));
+el('helpBtn').addEventListener('click', () => el('helpPanel').classList.toggle('hidden'));
+
+// ---------- Editör paneli ----------
+el('editorBtn').addEventListener('click', () => el('editorPanel').classList.toggle('hidden'));
+
+el('edAz').addEventListener('input', (e) => {
+  const vp = state.viewpoints[state.activeVp];
+  if (!vp) return;
+  vp.limits.azDeg = +e.target.value;
+  el('edAzVal').textContent = `${vp.limits.azDeg}°`;
+  state.azTarget = THREE.MathUtils.clamp(state.azTarget, -vp.limits.azDeg * DEG, vp.limits.azDeg * DEG);
+});
+el('edPol').addEventListener('input', (e) => {
+  const vp = state.viewpoints[state.activeVp];
+  if (!vp) return;
+  vp.limits.polDeg = +e.target.value;
+  el('edPolVal').textContent = `${vp.limits.polDeg}°`;
+  state.polTarget = THREE.MathUtils.clamp(state.polTarget, -vp.limits.polDeg * DEG, vp.limits.polDeg * DEG);
+});
+el('edZoomOn').addEventListener('change', (e) => { state.cfg.zoom.on = e.target.checked; });
+el('edZoomMin').addEventListener('change', (e) => {
+  state.cfg.zoom.min = Math.min(+e.target.value || 0.5, 1);
+  e.target.value = state.cfg.zoom.min;
+});
+el('edZoomMax').addEventListener('change', (e) => {
+  state.cfg.zoom.max = Math.max(+e.target.value || 1.6, 1);
+  e.target.value = state.cfg.zoom.max;
+});
+el('edTourOn').addEventListener('change', (e) => {
+  state.cfg.tour.on = e.target.checked;
+  if (e.target.checked && state.hasModel) {
+    state.mode = 'tour';
+    state.tourStartTime = performance.now() / 1000;
+  } else {
+    state.mode = 'interactive';
+  }
+});
+el('edTourSpeed').addEventListener('input', (e) => {
+  state.cfg.tour.speed = +e.target.value;
+  el('edTourSpeedVal').textContent = state.cfg.tour.speed.toFixed(2);
+});
+
+// ---------- Config: #cfg=base64url(JSON) ----------
+const b64urlEncode = (obj) => btoa(unescape(encodeURIComponent(JSON.stringify(obj))))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64urlDecode = (str) => JSON.parse(decodeURIComponent(escape(atob(
+  str.replace(/-/g, '+').replace(/_/g, '/')))));
+
+function buildCfg() {
+  const glbUrl = el('edGlbUrl').value.trim();
+  const videos = {};
+  for (const inp of el('edVideoUrls').querySelectorAll('input')) {
+    if (inp.value.trim()) videos[inp.dataset.screenId] = inp.value.trim();
+  }
+  return {
+    v: 1,
+    mode: 'preview',
+    glb: glbUrl,
+    videos,
+    vps: state.viewpoints.map(vp => ({ az: vp.limits.azDeg, pol: vp.limits.polDeg })),
+    vp: state.activeVp,
+    zoom: { ...state.cfg.zoom },
+    tour: { ...state.cfg.tour },
+  };
+}
+
+el('copyLinkBtn').addEventListener('click', async () => {
+  if (!state.hasModel) { showToast('Önce bir .glb yükleyin.'); return; }
+  const cfg = buildCfg();
+  if (!cfg.glb) { showToast('⚠ .glb URL alanı boş — müşteri linki için dosyanın host edildiği adres gerekli.', 6000); return; }
+  const missing = state.screens.filter(s => !cfg.videos[s.id]).length;
+  const link = `${location.origin}${location.pathname}#cfg=${b64urlEncode(cfg)}`;
+  try {
+    await navigator.clipboard.writeText(link);
+    showToast(missing ? `🔗 Link kopyalandı (${missing} ekranın video URL'i boş).` : '🔗 Preview linki panoya kopyalandı.');
+  } catch {
+    window.prompt('Linki kopyalayın:', link);
+  }
+});
+
+function applyCfgFromHash() {
+  const m = /[#&]cfg=([^&]+)/.exec(location.hash);
+  if (!m) return false;
+  let cfg;
+  try { cfg = b64urlDecode(m[1]); } catch { showToast('⚠ Link çözümlenemedi.'); return false; }
+  state.cfg.preview = cfg.mode === 'preview';
+  if (state.cfg.preview) document.body.classList.add('preview');
+  if (cfg.zoom) state.cfg.zoom = { min: cfg.zoom.min ?? 0.5, max: cfg.zoom.max ?? 1.6, on: cfg.zoom.on !== false };
+  if (cfg.tour) state.cfg.tour = { on: cfg.tour.on !== false, speed: cfg.tour.speed ?? 0.4 };
+  state.cfg.pendingVpLimits = Array.isArray(cfg.vps) ? cfg.vps : null;
+  state.cfg.initialVp = cfg.vp ?? 0;
+  state.cfg.cfgVideos = cfg.videos || null;
+  // Editör kontrollerini senkronla
+  el('edZoomOn').checked = state.cfg.zoom.on;
+  el('edZoomMin').value = state.cfg.zoom.min;
+  el('edZoomMax').value = state.cfg.zoom.max;
+  el('edTourOn').checked = state.cfg.tour.on;
+  el('edTourSpeed').value = state.cfg.tour.speed;
+  el('edTourSpeedVal').textContent = state.cfg.tour.speed.toFixed(2);
+  if (cfg.glb) { el('edGlbUrl').value = cfg.glb; loadModelURL(cfg.glb); }
+  return true;
+}
+
+// ---------- Render döngüsü ----------
+const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+function idealPosition(vp) {
+  const sph = new THREE.Spherical(vp.radius * state.zoom, vp.basePhi, vp.baseTheta);
+  return new THREE.Vector3().setFromSpherical(sph).add(vp.pivot);
+}
+
+function updateCamera(vp) {
+  const phi = THREE.MathUtils.clamp(vp.basePhi - state.pol, 0.05, Math.PI - 0.05);
+  const sph = new THREE.Spherical(vp.radius * state.zoom, phi, vp.baseTheta + state.az);
+  camera.position.setFromSpherical(sph).add(vp.pivot);
+  camera.lookAt(vp.pivot);
+}
+
+function updateAngleUI() {
+  const azDeg = state.az / DEG;
+  const polDeg = state.pol / DEG;
+  const fmt = (v) => `${v >= 0.05 ? '+' : v <= -0.05 ? '−' : ''}${Math.abs(v).toFixed(1)}°`;
+  angleValue.textContent = `${fmt(azDeg)} / ${fmt(polDeg)}`;
+}
+
+function tick(now) {
+  // VideoTexture normalde requestVideoFrameCallback ile güncellenir; bu callback'in
+  // çalışmadığı ortamlar (bazı webview'ler, gizli sekmeler) için garanti:
+  for (const s of state.screens) {
+    if (s.texture && s.video && s.video.readyState >= s.video.HAVE_CURRENT_DATA) {
+      s.texture.needsUpdate = true;
+    }
+  }
+
+  if (state.hasModel && state.viewpoints.length) {
+    const vp = state.viewpoints[state.activeVp];
+
+    if (state.vpTween) {
+      // Viewpoint geçiş uçuşu
+      const t = Math.min((now - state.vpTween.t0) / VP_TWEEN_DURATION, 1);
+      const e = easeInOutCubic(t);
+      const toPos = idealPosition(vp);
+      camera.position.lerpVectors(state.vpTween.fromPos, toPos, e);
+      const pivotNow = new THREE.Vector3().lerpVectors(state.vpTween.fromPivot, vp.pivot, e);
+      camera.fov = THREE.MathUtils.lerp(state.vpTween.fromFov, vp.fov, e);
+      camera.updateProjectionMatrix();
+      camera.lookAt(pivotNow);
+      if (t >= 1) {
+        state.vpTween = null;
+        state.tourStartTime = now / 1000;   // tur 0'dan yumuşak başlasın
+      }
+    } else {
+      if (state.mode === 'tour' && state.cfg.tour.on) {
+        state.azTarget = vp.limits.azDeg * DEG * Math.sin((now / 1000 - state.tourStartTime) * state.cfg.tour.speed);
+        state.polTarget = 0;
+      }
+
+      if (state.snap) {
+        const t = Math.min((now - state.snap.t0) / SNAP_DURATION, 1);
+        const e = easeInOutCubic(t);
+        state.az  = state.azTarget  = state.snap.fromAz  * (1 - e);
+        state.pol = state.polTarget = state.snap.fromPol * (1 - e);
+        if (t >= 1) state.snap = null;
+      } else {
+        state.az  += (state.azTarget  - state.az)  * DAMPING;
+        state.pol += (state.polTarget - state.pol) * DAMPING;
+      }
+      state.zoom += (state.zoomTarget - state.zoom) * DAMPING;
+
+      updateCamera(vp);
+    }
+    updateAngleUI();
+  }
+
+  renderer.render(scene, camera);
+}
+
+function animate(now) {
+  requestAnimationFrame(animate);
+  tick(now);
+}
+requestAnimationFrame(animate);
+
+// ---------- Açılış: #cfg / ?glb= / ?video= ----------
+const hadCfg = applyCfgFromHash();
+if (!hadCfg) {
+  const params = new URLSearchParams(location.search);
+  if (params.get('glb')) loadModelURL(params.get('glb'));
+  if (params.get('video')) loadVideoURL(params.get('video'), 0);
+}
+
+window.BillboardViewer = {
+  loadModelURL, loadVideoURL, switchViewpoint, setMutedAll,
+  state, camera, renderer, tick, buildCfg,
+};
+</script>
+</body>
+</html>

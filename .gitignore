@@ -1,0 +1,4 @@
+blend/
+*.blend1
+sample-billboard*.glb
+.claude/
