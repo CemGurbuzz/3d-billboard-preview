@@ -253,7 +253,7 @@
   </div>
   <div id="edVideoUrls"></div>
   <button class="primary" id="copyLinkBtn">🔗 Preview linkini kopyala</button>
-  <p class="note">Dosyaların müşterinin erişebileceği bir adreste (sunucu, GitHub Pages vb.) host edilmesi gerekir; sürükle-bırak ile yüklenen yerel dosyalar linkle taşınamaz. Link, tüm açı/zoom/tur ayarlarını içerir ve salt-önizleme modunda açılır.</p>
+  <p class="note">Dosyaların müşterinin erişebileceği bir adreste (sunucu, GitHub Pages vb.) host edilmesi gerekir; sürükle-bırak ile yüklenen yerel dosyalar linkle taşınamaz. Link, tüm açı/zoom/tur ayarlarını içerir ve salt-önizleme modunda açılır. Ayrı bir servise gerek yok: dosyayı bu reponun <code>assets/&lt;müşteri&gt;/</code> klasörüne koyup push ederseniz, buraya göreli yolu (örn. <code>assets/musteri1/sahne.glb</code>) yazabilirsiniz.</p>
 </div>
 
 <div id="angleIndicator" class="panel hidden">
@@ -296,6 +296,7 @@
     <li>Tekerlek / iki parmak: ileri-geri zoom</li>
     <li>Alt kısımdan viewpoint değiştirin; ⚙ Editör'den ayarları yapıp müşteri linki üretin</li>
     <li>URL ile otomatik yükleme: <code>?glb=URL&video=URL</code> veya <code>#cfg=…</code> (editörün ürettiği link)</li>
+    <li>Müşteri dosyalarını başka bir servise yüklemeden bu sitede barındırmak için: dosyayı repodaki <code>assets/&lt;müşteri&gt;/</code> klasörüne ekleyip push edin, URL alanına göreli yolu yazın (örn. <code>assets/musteri1/sahne.glb</code>)</li>
   </ul>
 </div>
 
